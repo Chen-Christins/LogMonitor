@@ -7,7 +7,11 @@
 ```text
 LogMonitor/
 ├── bin/
-│   └── LogMonitor.exe       # Windows 构建产物
+│   └── LogMonitor.exe       # 本地构建产物（不提交）
+├── .github/
+│   └── workflows/
+│       ├── ci.yml            # master 分支测试和检查
+│       └── release.yml       # Tag 发布跨平台程序包
 ├── cmd/
 │   └── logmonitor/
 │       └── main.go          # 程序入口
@@ -65,3 +69,33 @@ export FEISHU_SECRET='...'
 ```bash
 go build -o bin/LogMonitor ./cmd/logmonitor
 ```
+
+## 下载部署
+
+推送版本 Tag 后，GitHub Actions 会自动创建 Release：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Release 中会提供以下程序包：
+
+- `LogMonitor-vX.Y.Z-windows-amd64.tar.gz`
+- `LogMonitor-vX.Y.Z-linux-amd64.tar.gz`
+- `LogMonitor-vX.Y.Z-linux-arm64.tar.gz`
+- `SHA256SUMS`
+
+每个程序包包含可执行文件、`config.example.yaml` 和 `README.md`。下载后解压，并将配置模板复制成实际配置：
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Windows PowerShell：
+
+```powershell
+Copy-Item config.example.yaml config.yaml
+```
+
+然后修改 `config.yaml` 中的日志路径和飞书配置，启动程序即可。真实的 `config.yaml` 已被 `.gitignore` 忽略，不会被提交。

@@ -12,6 +12,8 @@ import (
 	"syscall"
 )
 
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to YAML configuration")
 	flag.Parse()
@@ -26,7 +28,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("starting LogMonitor with %d source(s)", len(cfg.LogSources))
+	log.Printf("starting LogMonitor %s with %d source(s)", version, len(cfg.LogSources))
 	if err := app.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatal(err)
 	}
