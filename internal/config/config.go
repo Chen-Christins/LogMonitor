@@ -29,8 +29,51 @@ type LogSourceConfig struct {
 }
 
 type FeishuConfig struct {
-	WebhookURL string `yaml:"webhook_url"`
-	Secret     string `yaml:"secret"`
+	WebhookURL      string       `yaml:"webhook_url"`
+	EnableSignature OptionalBool `yaml:"enable_signature"`
+	Secret          string       `yaml:"secret"`
+}
+
+type OptionalBool struct {
+	Set   bool
+	Value bool
+}
+
+func (b *OptionalBool) UnmarshalYAML(value *yaml.Node) error {
+	var raw any
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	switch v := raw.(type) {
+	case bool:
+		b.Value = v
+	case int:
+		if v != 0 && v != 1 {
+			return fmt.Errorf("must be 0, 1, true, or false")
+		}
+		b.Value = v == 1
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true":
+			b.Value = true
+		case "0", "false":
+			b.Value = false
+		default:
+			return fmt.Errorf("must be 0, 1, true, or false")
+		}
+	default:
+		return fmt.Errorf("must be 0, 1, true, or false")
+	}
+	b.Set = true
+	return nil
+}
+
+func (c FeishuConfig) SignatureEnabled() bool {
+	if c.EnableSignature.Set {
+		return c.EnableSignature.Value
+	}
+	return c.Secret != ""
 }
 
 type NotificationConfig struct {
@@ -61,6 +104,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Feishu.WebhookURL == "" {
 		return errors.New("config: feishu.webhook_url is required")
+	}
+	if c.Feishu.SignatureEnabled() && c.Feishu.Secret == "" {
+		return errors.New("config: feishu.secret is required when enable_signature is enabled")
 	}
 	if c.Notification.CooldownSeconds < 0 {
 		return errors.New("config: notification.cooldown_seconds must not be negative")

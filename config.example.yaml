@@ -17,6 +17,7 @@ log_sources:
 
 feishu:
   webhook_url: "${FEISHU_WEBHOOK_URL}"
+  enable_signature: 1
   secret: "${FEISHU_SECRET}"
 
 notification:
