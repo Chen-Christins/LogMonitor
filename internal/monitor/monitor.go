@@ -67,6 +67,7 @@ func (m *Monitor) Run(ctx context.Context) error {
 }
 
 func (m *Monitor) scan(ctx context.Context) {
+	m.sweepSeen()
 	for _, source := range m.config.LogSources {
 		paths, err := discover(source)
 		if err != nil {
@@ -244,14 +245,36 @@ func LogLevel(line, levelRegex string) (string, bool) {
 }
 
 func (m *Monitor) duplicate(path, trigger string) bool {
+	if m.config.Notification.CooldownSeconds <= 0 {
+		return false
+	}
 	key := path + "\x00" + trigger
 	now := time.Now()
-	previous := m.seen[key]
-	if m.config.Notification.CooldownSeconds > 0 && now.Sub(previous) < time.Duration(m.config.Notification.CooldownSeconds)*time.Second {
+	cooldown := time.Duration(m.config.Notification.CooldownSeconds) * time.Second
+	if previous, ok := m.seen[key]; ok && now.Sub(previous) < cooldown {
 		return true
 	}
 	m.seen[key] = now
 	return false
+}
+
+// sweepSeen removes dedup entries that are older than the cooldown window, so
+// the map does not grow without bound. Entries older than the cooldown can no
+// longer suppress duplicates, so deleting them is safe.
+func (m *Monitor) sweepSeen() {
+	cooldown := time.Duration(m.config.Notification.CooldownSeconds) * time.Second
+	if cooldown <= 0 {
+		if len(m.seen) > 0 {
+			m.seen = map[string]time.Time{}
+		}
+		return
+	}
+	cutoff := time.Now().Add(-cooldown)
+	for k, t := range m.seen {
+		if t.Before(cutoff) {
+			delete(m.seen, k)
+		}
+	}
 }
 
 func (m *Monitor) sendAlert(path string, source config.LogSourceConfig, alert *pendingAlert) {
