@@ -49,6 +49,38 @@ func TestMonitorDeduplicatesIdenticalAlert(t *testing.T) {
 	}
 }
 
+func TestMonitorAggregatesBurstIntoSingleMessage(t *testing.T) {
+	sender := &recordingSender{}
+	agg := 5
+	cfg := config.Config{Notification: config.NotificationConfig{MaxContextLines: 2, AggregateSeconds: &agg}}
+	m := New(cfg, sender, log.New(io.Discard, "", 0))
+	source := config.LogSourceConfig{Name: "app", Levels: []string{"ERROR"}, LevelRegex: `\b(ERROR)\b`}
+	tracker := &tracker{source: source}
+
+	for _, line := range []string{"ERROR a", "ERROR b", "ERROR c"} {
+		m.processLine("/var/log/app.log", line, tracker)
+	}
+	if len(sender.messages) != 0 {
+		t.Fatalf("expected no immediate message, got %d", len(sender.messages))
+	}
+	m.flushBatches()
+	if len(sender.messages) != 1 {
+		t.Fatalf("expected 1 aggregated message, got %d", len(sender.messages))
+	}
+	msg := sender.messages[0]
+	if msg.Level != "ERROR" || msg.Source != "app" {
+		t.Errorf("unexpected message metadata: %+v", msg)
+	}
+	if !strings.Contains(msg.Title, "3 条") {
+		t.Errorf("title should show count, got %q", msg.Title)
+	}
+	for _, expected := range []string{"ERROR a", "ERROR b", "ERROR c"} {
+		if !strings.Contains(msg.Content, expected) {
+			t.Errorf("message does not contain %q", expected)
+		}
+	}
+}
+
 func TestLevelMatchingIsCaseInsensitive(t *testing.T) {
 	if !LevelMatches("[2026-08-28 13:54:07.363179] [error] operation failed", []string{"ERROR"}, `\[\s*([A-Za-z]+)\s*\]`) {
 		t.Fatal("expected level to match")
