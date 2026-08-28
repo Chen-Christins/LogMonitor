@@ -24,3 +24,5 @@ notification:
   cooldown_seconds: 60
   max_context_lines: 100
   retry_count: 3
+  # 同来源+同级别的告警在窗口内合并为一条消息，避免突发日志刷屏；默认 5 秒，0 表示不合并
+  aggregate_seconds: 5

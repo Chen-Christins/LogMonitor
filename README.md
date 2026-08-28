@@ -70,6 +70,8 @@ sudo ./LogMonitor -d -c config.yaml  # 后台（Linux 需 root 安装服务）
 
 告警以飞书 interactive 卡片消息发送：头部颜色与表情图标按日志级别区分（`ERROR`/`FATAL` 为 🚨 红色，`WARN` 为 ⚠️ 橙色，其余为 ℹ️ 蓝色），卡片内展示来源、级别、文件、时间与日志上下文代码块。
 
+`notification.aggregate_seconds` 控制合并窗口：同来源+同级别的告警在窗口内会被合并成一条消息（标题显示条数），避免突发日志刷屏；默认 `5` 秒，设为 `0` 则每条独立发送。
+
 例如你的日志格式可以使用默认配置：
 
 ```yaml

@@ -84,7 +84,11 @@ func (c *FeishuClient) Send(m Message) error {
 			map[string]any{"tag": "hr"},
 			map[string]any{
 				"tag":  "div",
-				"text": map[string]any{"tag": "lark_md", "content": "📜 日志上下文\n```\n" + m.Content + "\n```"},
+				"text": map[string]any{"tag": "lark_md", "content": "📜 日志上下文"},
+			},
+			map[string]any{
+				"tag":     "code",
+				"content": m.Content,
 			},
 		},
 	}

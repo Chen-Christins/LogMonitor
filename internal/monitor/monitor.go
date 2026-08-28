@@ -22,6 +22,7 @@ type Monitor struct {
 	logger   *log.Logger
 	trackers map[string]*tracker
 	seen     map[string]time.Time
+	batches  map[string]*batchGroup
 	mu       sync.Mutex
 }
 
@@ -47,8 +48,19 @@ type pendingAlert struct {
 	remain  int
 }
 
+// batchGroup accumulates alerts that share the same source and level within the
+// aggregation window, so a burst of similar logs becomes a single message.
+type batchGroup struct {
+	source string
+	level  string
+	file   string
+	lines  []string
+	count  int
+	first  time.Time
+}
+
 func New(config config.Config, sender Sender, logger *log.Logger) *Monitor {
-	return &Monitor{config: config, sender: sender, logger: logger, trackers: map[string]*tracker{}, seen: map[string]time.Time{}}
+	return &Monitor{config: config, sender: sender, logger: logger, trackers: map[string]*tracker{}, seen: map[string]time.Time{}, batches: map[string]*batchGroup{}}
 }
 
 func (m *Monitor) Run(ctx context.Context) error {
@@ -67,6 +79,8 @@ func (m *Monitor) Run(ctx context.Context) error {
 }
 
 func (m *Monitor) scan(ctx context.Context) {
+	m.sweepSeen()
+	m.flushBatches()
 	for _, source := range m.config.LogSources {
 		paths, err := discover(source)
 		if err != nil {
@@ -244,30 +258,102 @@ func LogLevel(line, levelRegex string) (string, bool) {
 }
 
 func (m *Monitor) duplicate(path, trigger string) bool {
+	if m.config.Notification.CooldownSeconds <= 0 {
+		return false
+	}
 	key := path + "\x00" + trigger
 	now := time.Now()
-	previous := m.seen[key]
-	if m.config.Notification.CooldownSeconds > 0 && now.Sub(previous) < time.Duration(m.config.Notification.CooldownSeconds)*time.Second {
+	cooldown := time.Duration(m.config.Notification.CooldownSeconds) * time.Second
+	if previous, ok := m.seen[key]; ok && now.Sub(previous) < cooldown {
 		return true
 	}
 	m.seen[key] = now
 	return false
 }
 
+// sweepSeen removes dedup entries that are older than the cooldown window, so
+// the map does not grow without bound. Entries older than the cooldown can no
+// longer suppress duplicates, so deleting them is safe.
+func (m *Monitor) sweepSeen() {
+	cooldown := time.Duration(m.config.Notification.CooldownSeconds) * time.Second
+	if cooldown <= 0 {
+		if len(m.seen) > 0 {
+			m.seen = map[string]time.Time{}
+		}
+		return
+	}
+	cutoff := time.Now().Add(-cooldown)
+	for k, t := range m.seen {
+		if t.Before(cutoff) {
+			delete(m.seen, k)
+		}
+	}
+}
+
+func (m *Monitor) aggregateSeconds() int {
+	a := m.config.Notification.AggregateSeconds
+	if a == nil {
+		return 0
+	}
+	return *a
+}
+
 func (m *Monitor) sendAlert(path string, source config.LogSourceConfig, alert *pendingAlert) {
 	if len(alert.lines) > m.config.Notification.MaxContextLines {
 		alert.lines = alert.lines[:m.config.Notification.MaxContextLines]
 	}
-	msg := feishu.Message{
-		Title:   fmt.Sprintf("LogMonitor 告警 - %s", alert.level),
-		Level:   alert.level,
-		Source:  source.Name,
-		File:    path,
-		Time:    time.Now().Format(time.RFC3339),
-		Content: strings.Join(alert.lines, "\n"),
+	if m.aggregateSeconds() <= 0 {
+		m.sendFeishu(feishu.Message{
+			Title:   fmt.Sprintf("LogMonitor 告警 - %s", alert.level),
+			Level:   alert.level,
+			Source:  source.Name,
+			File:    path,
+			Time:    time.Now().Format(time.RFC3339),
+			Content: strings.Join(alert.lines, "\n"),
+		})
+		return
 	}
+	m.addToBatch(source.Name, path, alert)
+}
+
+func (m *Monitor) addToBatch(source, file string, alert *pendingAlert) {
+	key := source + "\x00" + alert.level
+	g, ok := m.batches[key]
+	if !ok {
+		g = &batchGroup{source: source, level: alert.level, file: file, first: time.Now()}
+		m.batches[key] = g
+	}
+	if g.file == "" {
+		g.file = file
+	}
+	g.lines = append(g.lines, alert.lines...)
+	g.count++
+}
+
+// flushBatches sends and clears groups whose aggregation window has elapsed or
+// that have grown past the context limit, turning a burst into a single message.
+func (m *Monitor) flushBatches() {
+	window := time.Duration(m.aggregateSeconds()) * time.Second
+	maxLines := m.config.Notification.MaxContextLines
+	for k, g := range m.batches {
+		if time.Since(g.first) < window && len(g.lines) < maxLines {
+			continue
+		}
+		m.sendFeishu(feishu.Message{
+			Title:   fmt.Sprintf("LogMonitor 告警 - %s (%d 条)", g.level, g.count),
+			Level:   g.level,
+			Source:  g.source,
+			File:    g.file,
+			Time:    time.Now().Format(time.RFC3339),
+			Content: strings.Join(g.lines, "\n"),
+		})
+		delete(m.batches, k)
+	}
+}
+
+func (m *Monitor) sendFeishu(msg feishu.Message) {
 	if err := m.sender.Send(msg); err != nil {
-		m.logger.Printf("send alert for %s: %v", path, err)
+		m.logger.Printf("send alert for %s: %v", msg.File, err)
 	}
 }
 
@@ -280,6 +366,7 @@ func (m *Monitor) flushIdlePending() {
 }
 
 func (m *Monitor) flushPending() {
+	m.flushBatches()
 	for path, t := range m.trackers {
 		m.flushTracker(t, path)
 	}

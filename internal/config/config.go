@@ -77,9 +77,10 @@ func (c FeishuConfig) SignatureEnabled() bool {
 }
 
 type NotificationConfig struct {
-	CooldownSeconds int `yaml:"cooldown_seconds"`
-	MaxContextLines int `yaml:"max_context_lines"`
-	RetryCount      int `yaml:"retry_count"`
+	CooldownSeconds  int  `yaml:"cooldown_seconds"`
+	MaxContextLines  int  `yaml:"max_context_lines"`
+	RetryCount       int  `yaml:"retry_count"`
+	AggregateSeconds *int `yaml:"aggregate_seconds"`
 }
 
 func Load(path string) (Config, error) {
@@ -110,6 +111,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Notification.CooldownSeconds < 0 {
 		return errors.New("config: notification.cooldown_seconds must not be negative")
+	}
+	if c.Notification.AggregateSeconds == nil {
+		def := 5
+		c.Notification.AggregateSeconds = &def
+	} else if *c.Notification.AggregateSeconds < 0 {
+		return errors.New("config: notification.aggregate_seconds must not be negative")
 	}
 	if c.Notification.MaxContextLines <= 0 {
 		c.Notification.MaxContextLines = 100
