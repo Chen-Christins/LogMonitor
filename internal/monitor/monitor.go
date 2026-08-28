@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -187,7 +188,7 @@ func (m *Monitor) processLine(path, line string, t *tracker) {
 		i++
 	}
 
-	if LevelMatches(line, t.source.Levels) && !m.duplicate(path, line) {
+	if LevelMatches(line, t.source.Levels, t.source.LevelRegex) && !m.duplicate(path, line) {
 		lines := append([]string(nil), t.previous...)
 		if len(lines) >= m.config.Notification.MaxContextLines {
 			lines = lines[len(lines)-m.config.Notification.MaxContextLines+1:]
@@ -207,14 +208,32 @@ func (m *Monitor) processLine(path, line string, t *tracker) {
 	}
 }
 
-func LevelMatches(line string, levels []string) bool {
-	upper := strings.ToUpper(line)
-	for _, level := range levels {
-		if strings.Contains(upper, level) {
-			return true
+func LevelMatches(line string, levels []string, levelRegex string) bool {
+	if levelRegex == "" {
+		levelRegex = `\[\s*([A-Za-z][A-Za-z0-9_-]*)\s*\]`
+	}
+	if level, ok := LogLevel(line, levelRegex); ok {
+		for _, configured := range levels {
+			if strings.EqualFold(level, configured) {
+				return true
+			}
 		}
+		return false
 	}
 	return false
+}
+
+// LogLevel extracts levels such as [INFO], [WARN] and [ERROR].
+func LogLevel(line, levelRegex string) (string, bool) {
+	pattern, err := regexp.Compile(levelRegex)
+	if err != nil {
+		return "", false
+	}
+	match := pattern.FindStringSubmatch(line)
+	if len(match) != 2 {
+		return "", false
+	}
+	return strings.ToUpper(match[1]), true
 }
 
 func (m *Monitor) duplicate(path, trigger string) bool {

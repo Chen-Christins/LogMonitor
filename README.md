@@ -25,6 +25,7 @@ LogMonitor/
 │       ├── monitor.go       # 文件跟踪、目录发现、上下文收集
 │       └── monitor_test.go
 ├── config.example.yaml
+├── CHANGELOG.md           # 版本记录，发布流水线从这里读取版本
 ├── go.mod
 └── README.md
 ```
@@ -42,11 +43,35 @@ go run ./cmd/logmonitor -config config.yaml
 ## 配置说明
 
 - `levels`：大小写不敏感的日志级别关键字，默认是 `ERROR`。
+- `level_regex`：日志级别提取正则，必须包含一个捕获组；默认匹配 `[INFO]`、`[WARN]`、`[ERROR]` 等格式。
 - `before_lines`、`after_lines`：告警前后的上下文行数。
 - `cooldown_seconds`：相同文件、相同触发行的去重时间，`0` 表示不去重。
 - `max_context_lines`：单条消息最多携带的日志行数。
 - `retry_count`：飞书发送失败后的总尝试次数。
 - `secret`：飞书机器人开启签名校验时填写，未开启则留空。
+
+日志级别通过每个日志源的 `level_regex` 提取。正则必须包含一个捕获组，捕获组内容会与 `levels` 比较。对于包含方括号级别的日志，程序只匹配级别字段，不会因为日志正文中出现 `ERROR` 而误报。
+
+例如你的日志格式可以使用默认配置：
+
+```yaml
+level_regex: "\\[\\s*([A-Za-z][A-Za-z0-9_-]*)\\s*\\]"
+levels: [ERROR, FATAL]
+```
+
+如果日志格式是 `2026-08-28 ERROR message`，可以配置：
+
+```yaml
+level_regex: "\\b(INFO|WARN|ERROR|FATAL)\\b"
+levels: [ERROR, FATAL]
+```
+
+如果级别位于 JSON 字段中，可以配置：
+
+```yaml
+level_regex: '"level"\\s*:\\s*"([^"]+)"'
+levels: [ERROR]
+```
 
 配置支持 `${ENV_NAME}` 环境变量。推荐把 WebHook 和密钥放在环境变量中：
 
@@ -72,12 +97,27 @@ go build -o bin/LogMonitor ./cmd/logmonitor
 
 ## 下载部署
 
-推送版本 Tag 后，GitHub Actions 会自动创建 Release：
+推送到 `master` 时，GitHub Actions 会读取 `CHANGELOG.md` 第一条版本标题，并自动创建 Draft Release。版本标题格式：
+
+```markdown
+## [v0.1.0] - 2026-08-28
+```
+
+版本标题放在 Markdown 代码块中也可以识别，例如：
+
+```markdown
+## [v0.1.0] - 2026-08-28
+```
+
+代码块标记不会影响版本提取，流水线只匹配其中的 `##` 版本标题。无论使用 `[v0.1.0]` 还是 `v0.1.0` 格式都支持。
+
+推送代码即可触发：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git push origin master
 ```
+
+该版本对应的 Changelog 内容会作为 Release Notes。也可以在 GitHub Actions 页面手动运行 `Release`，通过 `version` 输入框指定版本，例如 `v0.1.1`。如果该版本 Release 已存在，流水线会跳过，避免重复发布。
 
 Release 中会提供以下程序包：
 

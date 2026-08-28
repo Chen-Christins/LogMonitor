@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -22,6 +23,7 @@ type LogSourceConfig struct {
 	Pattern     string   `yaml:"pattern"`
 	Recursive   bool     `yaml:"recursive"`
 	Levels      []string `yaml:"levels"`
+	LevelRegex  string   `yaml:"level_regex"`
 	BeforeLines int      `yaml:"before_lines"`
 	AfterLines  int      `yaml:"after_lines"`
 }
@@ -82,6 +84,12 @@ func (c *Config) Validate() error {
 		}
 		if len(s.Levels) == 0 {
 			s.Levels = []string{"ERROR"}
+		}
+		if s.LevelRegex == "" {
+			s.LevelRegex = `\[\s*([A-Za-z][A-Za-z0-9_-]*)\s*\]`
+		}
+		if _, err := regexp.Compile(s.LevelRegex); err != nil {
+			return fmt.Errorf("config: source %q has invalid level_regex: %w", s.Name, err)
 		}
 		for j := range s.Levels {
 			s.Levels[j] = strings.ToUpper(strings.TrimSpace(s.Levels[j]))

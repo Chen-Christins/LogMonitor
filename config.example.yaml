@@ -1,6 +1,7 @@
 log_sources:
   - name: linux-app
     file: "/var/log/myapp/app.log"
+    level_regex: "\\[\\s*([A-Za-z][A-Za-z0-9_-]*)\\s*\\]"
     levels: [ERROR, FATAL]
     before_lines: 5
     after_lines: 5
@@ -8,6 +9,7 @@ log_sources:
   - name: windows-app
     directory: "C:/logs/myapp"
     pattern: "*.log"
+    level_regex: "\\[\\s*([A-Za-z][A-Za-z0-9_-]*)\\s*\\]"
     recursive: true
     levels: [WARN, ERROR]
     before_lines: 10

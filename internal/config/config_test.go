@@ -19,6 +19,9 @@ func TestConfigSupportsFileAndDirectorySources(t *testing.T) {
 	if cfg.LogSources[1].Pattern != "*.log" {
 		t.Fatalf("default pattern = %q", cfg.LogSources[1].Pattern)
 	}
+	if cfg.LogSources[0].LevelRegex == "" {
+		t.Fatal("expected default level regex")
+	}
 }
 
 func TestConfigRejectsFileAndDirectoryTogether(t *testing.T) {
