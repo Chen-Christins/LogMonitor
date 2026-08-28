@@ -1,0 +1,23 @@
+log_sources:
+  - name: linux-app
+    file: "/var/log/myapp/app.log"
+    levels: [ERROR, FATAL]
+    before_lines: 5
+    after_lines: 5
+
+  - name: windows-app
+    directory: "C:/logs/myapp"
+    pattern: "*.log"
+    recursive: true
+    levels: [WARN, ERROR]
+    before_lines: 10
+    after_lines: 10
+
+feishu:
+  webhook_url: "${FEISHU_WEBHOOK_URL}"
+  secret: "${FEISHU_SECRET}"
+
+notification:
+  cooldown_seconds: 60
+  max_context_lines: 100
+  retry_count: 3

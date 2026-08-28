@@ -1,0 +1,13 @@
+# Local configuration may contain Feishu webhook secrets.
+config.yaml
+configs/config.yaml
+
+# Build output.
+bin/*
+!bin/.gitkeep
+
+# Go and IDE generated files.
+*.exe
+*.test
+*.out
+.idea/
