@@ -58,37 +58,51 @@ func levelEmoji(level string) string {
 	}
 }
 
+func fieldColumn(label, value string) map[string]any {
+	return map[string]any{
+		"tag":    "column",
+		"width":  "weighted",
+		"weight": 1,
+		"elements": []any{
+			map[string]any{"tag": "markdown", "content": "**" + label + "**\n" + value},
+		},
+	}
+}
+
+func columnSet(left, right map[string]any) map[string]any {
+	return map[string]any{
+		"tag":     "column_set",
+		"columns": []any{left, right},
+	}
+}
+
 func (c *FeishuClient) Send(m Message) error {
 	card := map[string]any{
-		"config": map[string]any{"wide_screen_mode": true},
+		"schema": "2.0",
+		"config": map[string]any{
+			"update_multi": true,
+		},
 		"header": map[string]any{
 			"title":    map[string]any{"tag": "plain_text", "content": levelEmoji(m.Level) + " " + m.Title},
 			"template": levelColor(m.Level),
 		},
-		"elements": []any{
-			map[string]any{
-				"tag": "div",
-				"fields": []any{
-					map[string]any{"is_short": true, "text": map[string]any{"tag": "lark_md", "content": "**📦 来源**\n" + m.Source}},
-					map[string]any{"is_short": true, "text": map[string]any{"tag": "lark_md", "content": "**🔖 级别**\n" + m.Level}},
+		"body": map[string]any{
+			"direction": "vertical",
+			"padding":   "12px 12px 12px 12px",
+			"elements": []any{
+				columnSet(
+					fieldColumn("📦 来源", m.Source),
+					fieldColumn("🔖 级别", m.Level),
+				),
+				columnSet(
+					fieldColumn("📁 文件", m.File),
+					fieldColumn("⏰ 时间", m.Time),
+				),
+				map[string]any{"tag": "hr"},
+				map[string]any{
+					"tag":     "markdown",
+					"content": "📜 日志上下文\n\n```plain_text\n" + m.Content + "\n```",
 				},
-			},
-			map[string]any{
-				"tag":  "div",
-				"text": map[string]any{"tag": "lark_md", "content": "**📁 文件**\n" + m.File},
-			},
-			map[string]any{
-				"tag":  "div",
-				"text": map[string]any{"tag": "lark_md", "content": "**⏰ 时间**\n" + m.Time},
-			},
-			map[string]any{"tag": "hr"},
-			map[string]any{
-				"tag":  "div",
-				"text": map[string]any{"tag": "lark_md", "content": "📜 日志上下文"},
-			},
-			map[string]any{
-				"tag":     "code",
-				"content": m.Content,
 			},
 		},
 	}
