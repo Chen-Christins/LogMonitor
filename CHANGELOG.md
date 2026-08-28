@@ -9,6 +9,10 @@
 - `-d` flag to install and run LogMonitor as a background system service (Windows Service / systemd) via `kardianos/service`.
 - `-c` flag 指定配置文件路径（原为 `-config`）。
 
+### Fixed
+
+- 后台服务模式使用绝对配置路径并设置服务工作目录，避免 systemd 下相对路径 `conf/monitor.yml` 找不到文件。重跑 `-d` 会自动重装以修复已有安装。
+
 ## [v0.1.0] - 2026-08-28
 
 ### Added

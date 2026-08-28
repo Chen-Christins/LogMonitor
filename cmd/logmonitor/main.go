@@ -7,6 +7,8 @@ import (
 	"context"
 	"flag"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/kardianos/service"
 )
@@ -42,7 +44,12 @@ func main() {
 	daemon := flag.Bool("d", false, "install and run as a background system service")
 	flag.Parse()
 
-	cfg, err := config.Load(*configPath)
+	absConfig, err := filepath.Abs(*configPath)
+	if err != nil {
+		log.Fatalf("resolve config path: %v", err)
+	}
+
+	cfg, err := config.Load(absConfig)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -50,11 +57,17 @@ func main() {
 	client := feishu.NewClient(cfg.Feishu, cfg.Notification)
 	app := monitor.New(cfg, client, log.Default())
 
+	wd, err := os.Getwd()
+	if err != nil {
+		wd = ""
+	}
+
 	svcConfig := &service.Config{
-		Name:        "LogMonitor",
-		DisplayName: "LogMonitor",
-		Description: "Cross-platform log monitoring with Feishu notifications",
-		Arguments:   []string{"-s", "-c", *configPath},
+		Name:             "LogMonitor",
+		DisplayName:      "LogMonitor",
+		Description:      "Cross-platform log monitoring with Feishu notifications",
+		WorkingDirectory: wd,
+		Arguments:        []string{"-s", "-c", absConfig},
 	}
 
 	prg := &program{monitor: app}
@@ -64,8 +77,10 @@ func main() {
 	}
 
 	if *daemon {
+		_ = service.Control(s, "stop")
+		_ = service.Control(s, "uninstall")
 		if err := service.Control(s, "install"); err != nil {
-			log.Printf("install skipped: %v", err)
+			log.Fatalf("install service: %v", err)
 		}
 		if err := service.Control(s, "start"); err != nil {
 			log.Fatalf("start service: %v", err)
