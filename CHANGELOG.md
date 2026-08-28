@@ -8,6 +8,7 @@
 - `-s` flag to run in the foreground (console), which is also the default when no flag is given.
 - `-d` flag to install and run LogMonitor as a background system service (Windows Service / systemd) via `kardianos/service`.
 - `-c` flag 指定配置文件路径（原为 `-config`）。
+- 飞书告警消息改为 interactive 卡片：头部颜色与表情按日志级别区分（ERROR/FATAL 🚨 红、WARN ⚠️ 橙、其余 ℹ️ 蓝），并通过字段展示来源、级别、文件、时间与日志上下文。
 
 ### Fixed
 

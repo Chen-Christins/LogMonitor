@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	"LogMonitor/internal/config"
+	"LogMonitor/internal/feishu"
 )
 
-type recordingSender struct{ messages []string }
+type recordingSender struct{ messages []feishu.Message }
 
-func (s *recordingSender) Send(_, content string) error {
-	s.messages = append(s.messages, content)
+func (s *recordingSender) Send(m feishu.Message) error {
+	s.messages = append(s.messages, m)
 	return nil
 }
 
@@ -29,7 +30,7 @@ func TestMonitorCollectsBeforeAndAfterContext(t *testing.T) {
 		t.Fatalf("messages = %d", len(sender.messages))
 	}
 	for _, expected := range []string{"before 1", "before 2", "ERROR failed", "after 1", "after 2"} {
-		if !strings.Contains(sender.messages[0], expected) {
+		if !strings.Contains(sender.messages[0].Content, expected) {
 			t.Errorf("message does not contain %q", expected)
 		}
 	}
