@@ -33,8 +33,23 @@ LogMonitor/
 ## 使用
 
 ```bash
-go run ./cmd/logmonitor -config config.yaml
+go run ./cmd/logmonitor -c config.yaml
 ```
+
+运行模式：
+
+- `-s`：前台运行（终端阻塞，Ctrl+C 退出）。不传任何标志时默认就是前台模式。
+- `-d`：以后台系统服务方式安装并启动（Windows Service / systemd），安装需要管理员/root 权限。启动后原进程退出，监控由系统服务进程在后台持续运行。
+
+```bash
+./LogMonitor -s -c config.yaml   # 前台
+sudo ./LogMonitor -d -c config.yaml  # 后台（Linux 需 root 安装服务）
+```
+
+后台服务的停止与卸载使用系统命令：
+
+- Linux：`systemctl stop LogMonitor`、`systemctl disable LogMonitor`
+- Windows：`sc stop LogMonitor`、`sc delete LogMonitor`
 
 复制 `config.example.yaml` 后填写飞书 WebHook。`file` 与 `directory` 必须二选一；目录使用 `pattern` 匹配文件名，并可用 `recursive` 递归子目录。Windows 和 Linux 路径都可配置，程序应在对应操作系统上运行。
 
@@ -79,7 +94,7 @@ levels: [ERROR]
 ```powershell
 $env:FEISHU_WEBHOOK_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/..."
 $env:FEISHU_SECRET = "..."
-./LogMonitor.exe -config config.yaml
+./LogMonitor.exe -c config.yaml
 ```
 
 Linux 示例：
@@ -87,7 +102,7 @@ Linux 示例：
 ```bash
 export FEISHU_WEBHOOK_URL='https://open.feishu.cn/open-apis/bot/v2/hook/...'
 export FEISHU_SECRET='...'
-./LogMonitor -config config.yaml
+./LogMonitor -c config.yaml
 ```
 
 构建当前平台版本：
