@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"LogMonitor/internal/config"
+	"LogMonitor/internal/feishu"
 )
 
 type Monitor struct {
@@ -25,7 +26,7 @@ type Monitor struct {
 }
 
 type Sender interface {
-	Send(title, content string) error
+	Send(msg feishu.Message) error
 }
 
 type tracker struct {
@@ -41,6 +42,7 @@ type tracker struct {
 
 type pendingAlert struct {
 	trigger string
+	level   string
 	lines   []string
 	remain  int
 }
@@ -188,13 +190,13 @@ func (m *Monitor) processLine(path, line string, t *tracker) {
 		i++
 	}
 
-	if LevelMatches(line, t.source.Levels, t.source.LevelRegex) && !m.duplicate(path, line) {
+	if level, ok := MatchLevel(line, t.source.Levels, t.source.LevelRegex); ok && !m.duplicate(path, line) {
 		lines := append([]string(nil), t.previous...)
 		if len(lines) >= m.config.Notification.MaxContextLines {
 			lines = lines[len(lines)-m.config.Notification.MaxContextLines+1:]
 		}
 		lines = append(lines, line)
-		alert := &pendingAlert{trigger: line, lines: lines, remain: t.source.AfterLines}
+		alert := &pendingAlert{trigger: line, level: level, lines: lines, remain: t.source.AfterLines}
 		if alert.remain == 0 || len(alert.lines) >= m.config.Notification.MaxContextLines {
 			m.sendAlert(path, t.source, alert)
 		} else {
@@ -209,18 +211,23 @@ func (m *Monitor) processLine(path, line string, t *tracker) {
 }
 
 func LevelMatches(line string, levels []string, levelRegex string) bool {
+	_, ok := MatchLevel(line, levels, levelRegex)
+	return ok
+}
+
+// MatchLevel returns the configured level that matched the line, if any.
+func MatchLevel(line string, levels []string, levelRegex string) (string, bool) {
 	if levelRegex == "" {
 		levelRegex = `\[\s*([A-Za-z][A-Za-z0-9_-]*)\s*\]`
 	}
 	if level, ok := LogLevel(line, levelRegex); ok {
 		for _, configured := range levels {
 			if strings.EqualFold(level, configured) {
-				return true
+				return configured, true
 			}
 		}
-		return false
 	}
-	return false
+	return "", false
 }
 
 // LogLevel extracts levels such as [INFO], [WARN] and [ERROR].
@@ -251,8 +258,15 @@ func (m *Monitor) sendAlert(path string, source config.LogSourceConfig, alert *p
 	if len(alert.lines) > m.config.Notification.MaxContextLines {
 		alert.lines = alert.lines[:m.config.Notification.MaxContextLines]
 	}
-	content := fmt.Sprintf("Source: %s\nFile: %s\nTime: %s\n\n%s", source.Name, path, time.Now().Format(time.RFC3339), strings.Join(alert.lines, "\n"))
-	if err := m.sender.Send("LogMonitor Alert", content); err != nil {
+	msg := feishu.Message{
+		Title:   fmt.Sprintf("LogMonitor 告警 - %s", alert.level),
+		Level:   alert.level,
+		Source:  source.Name,
+		File:    path,
+		Time:    time.Now().Format(time.RFC3339),
+		Content: strings.Join(alert.lines, "\n"),
+	}
+	if err := m.sender.Send(msg); err != nil {
 		m.logger.Printf("send alert for %s: %v", path, err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"LogMonitor/internal/config"
@@ -21,12 +22,73 @@ type FeishuClient struct {
 	httpClient   *http.Client
 }
 
+// Message is the structured payload sent to Feishu.
+type Message struct {
+	Title   string
+	Level   string
+	Source  string
+	File    string
+	Time    string
+	Content string
+}
+
 func NewClient(config config.FeishuConfig, notification config.NotificationConfig) *FeishuClient {
 	return &FeishuClient{config: config, notification: notification, httpClient: &http.Client{Timeout: 10 * time.Second}}
 }
 
-func (c *FeishuClient) Send(title, content string) error {
-	payload := map[string]any{"msg_type": "text", "content": map[string]string{"text": title + "\n\n" + content}}
+func levelColor(level string) string {
+	switch strings.ToUpper(level) {
+	case "FATAL", "ERROR", "CRITICAL":
+		return "red"
+	case "WARN", "WARNING":
+		return "orange"
+	default:
+		return "blue"
+	}
+}
+
+func levelEmoji(level string) string {
+	switch strings.ToUpper(level) {
+	case "FATAL", "ERROR", "CRITICAL":
+		return "🚨"
+	case "WARN", "WARNING":
+		return "⚠️"
+	default:
+		return "ℹ️"
+	}
+}
+
+func (c *FeishuClient) Send(m Message) error {
+	card := map[string]any{
+		"config": map[string]any{"wide_screen_mode": true},
+		"header": map[string]any{
+			"title":    map[string]any{"tag": "plain_text", "content": levelEmoji(m.Level) + " " + m.Title},
+			"template": levelColor(m.Level),
+		},
+		"elements": []any{
+			map[string]any{
+				"tag": "div",
+				"fields": []any{
+					map[string]any{"is_short": true, "text": map[string]any{"tag": "lark_md", "content": "**📦 来源**\n" + m.Source}},
+					map[string]any{"is_short": true, "text": map[string]any{"tag": "lark_md", "content": "**🔖 级别**\n" + m.Level}},
+				},
+			},
+			map[string]any{
+				"tag":  "div",
+				"text": map[string]any{"tag": "lark_md", "content": "**📁 文件**\n" + m.File},
+			},
+			map[string]any{
+				"tag":  "div",
+				"text": map[string]any{"tag": "lark_md", "content": "**⏰ 时间**\n" + m.Time},
+			},
+			map[string]any{"tag": "hr"},
+			map[string]any{
+				"tag":  "div",
+				"text": map[string]any{"tag": "lark_md", "content": "📜 日志上下文\n```\n" + m.Content + "\n```"},
+			},
+		},
+	}
+	payload := map[string]any{"msg_type": "interactive", "card": card}
 	if c.config.SignatureEnabled() {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
 		payload["timestamp"], payload["sign"] = ts, signature(ts, c.config.Secret)
