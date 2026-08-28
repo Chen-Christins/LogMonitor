@@ -27,10 +27,9 @@ func NewClient(config config.FeishuConfig, notification config.NotificationConfi
 
 func (c *FeishuClient) Send(title, content string) error {
 	payload := map[string]any{"msg_type": "text", "content": map[string]string{"text": title + "\n\n" + content}}
-	if c.config.Secret != "" {
+	if c.config.SignatureEnabled() {
 		ts := strconv.FormatInt(time.Now().Unix(), 10)
-		mac := hmac.New(sha256.New, []byte(ts+"\n"+c.config.Secret))
-		payload["timestamp"], payload["sign"] = ts, base64.StdEncoding.EncodeToString(mac.Sum(nil))
+		payload["timestamp"], payload["sign"] = ts, signature(ts, c.config.Secret)
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -72,4 +71,9 @@ func (c *FeishuClient) Send(title, content string) error {
 		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 	}
 	return fmt.Errorf("send Feishu webhook: %w", last)
+}
+
+func signature(timestamp, secret string) string {
+	mac := hmac.New(sha256.New, []byte(timestamp+"\n"+secret))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }

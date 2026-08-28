@@ -49,6 +49,7 @@ go run ./cmd/logmonitor -config config.yaml
 - `max_context_lines`：单条消息最多携带的日志行数。
 - `retry_count`：飞书发送失败后的总尝试次数。
 - `secret`：飞书机器人开启签名校验时填写，未开启则留空。
+- `enable_signature`：是否启用飞书签名，支持 `1`、`0`、`true`、`false`。启用时必须配置 `secret`；未配置该字段时，会根据 `secret` 是否为空自动判断。
 
 日志级别通过每个日志源的 `level_regex` 提取。正则必须包含一个捕获组，捕获组内容会与 `levels` 比较。对于包含方括号级别的日志，程序只匹配级别字段，不会因为日志正文中出现 `ERROR` 而误报。
 
