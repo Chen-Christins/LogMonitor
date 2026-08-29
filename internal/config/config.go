@@ -14,6 +14,7 @@ type Config struct {
 	LogSources   []LogSourceConfig  `yaml:"log_sources"`
 	Feishu       FeishuConfig       `yaml:"feishu"`
 	Notification NotificationConfig `yaml:"notification"`
+	Runtime      RuntimeConfig      `yaml:"runtime"`
 }
 
 type LogSourceConfig struct {
@@ -79,8 +80,16 @@ func (c FeishuConfig) SignatureEnabled() bool {
 type NotificationConfig struct {
 	CooldownSeconds  int  `yaml:"cooldown_seconds"`
 	MaxContextLines  int  `yaml:"max_context_lines"`
+	MaxContextBytes  int  `yaml:"max_context_bytes"`
 	RetryCount       int  `yaml:"retry_count"`
 	AggregateSeconds *int `yaml:"aggregate_seconds"`
+}
+
+type RuntimeConfig struct {
+	MemoryLimitMB   int `yaml:"memory_limit_mb"`
+	ReadChunkBytes  int `yaml:"read_chunk_bytes"`
+	MaxLineBytes    int `yaml:"max_line_bytes"`
+	MaxTrackedFiles int `yaml:"max_tracked_files"`
 }
 
 func Load(path string) (Config, error) {
@@ -121,8 +130,26 @@ func (c *Config) Validate() error {
 	if c.Notification.MaxContextLines <= 0 {
 		c.Notification.MaxContextLines = 100
 	}
+	if c.Notification.MaxContextBytes <= 0 {
+		c.Notification.MaxContextBytes = 64 * 1024
+	}
 	if c.Notification.RetryCount <= 0 {
 		c.Notification.RetryCount = 3
+	}
+	if c.Runtime.MemoryLimitMB <= 0 {
+		c.Runtime.MemoryLimitMB = 256
+	}
+	if c.Runtime.ReadChunkBytes <= 0 {
+		c.Runtime.ReadChunkBytes = 64 * 1024
+	}
+	if c.Runtime.MaxLineBytes <= 0 {
+		c.Runtime.MaxLineBytes = 1024 * 1024
+	}
+	if c.Runtime.MaxTrackedFiles <= 0 {
+		c.Runtime.MaxTrackedFiles = 1000
+	}
+	if c.Runtime.ReadChunkBytes > c.Runtime.MaxLineBytes {
+		return errors.New("config: runtime.read_chunk_bytes must not exceed runtime.max_line_bytes")
 	}
 	for i := range c.LogSources {
 		s := &c.LogSources[i]
@@ -155,6 +182,9 @@ func (c *Config) Validate() error {
 		}
 		if s.BeforeLines < 0 || s.AfterLines < 0 {
 			return fmt.Errorf("config: source %q context line counts must not be negative", s.Name)
+		}
+		if s.BeforeLines > c.Notification.MaxContextLines || s.AfterLines > c.Notification.MaxContextLines {
+			return fmt.Errorf("config: source %q context line counts must not exceed notification.max_context_lines", s.Name)
 		}
 	}
 	return nil

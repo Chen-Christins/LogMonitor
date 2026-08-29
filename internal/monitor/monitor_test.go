@@ -52,7 +52,7 @@ func TestMonitorDeduplicatesIdenticalAlert(t *testing.T) {
 func TestMonitorAggregatesBurstIntoSingleMessage(t *testing.T) {
 	sender := &recordingSender{}
 	agg := 5
-	cfg := config.Config{Notification: config.NotificationConfig{MaxContextLines: 2, AggregateSeconds: &agg}}
+	cfg := config.Config{Notification: config.NotificationConfig{MaxContextLines: 3, AggregateSeconds: &agg}}
 	m := New(cfg, sender, log.New(io.Discard, "", 0))
 	source := config.LogSourceConfig{Name: "app", Levels: []string{"ERROR"}, LevelRegex: `\b(ERROR)\b`}
 	tracker := &tracker{source: source}
@@ -102,5 +102,44 @@ func TestLogLevelExtractsExampleFormat(t *testing.T) {
 	level, ok := LogLevel(line, `\[\s*([A-Za-z]+)\s*\]`)
 	if !ok || level != "INFO" {
 		t.Fatalf("LogLevel() = %q, %v", level, ok)
+	}
+}
+
+func TestProcessChunkHandlesSplitLines(t *testing.T) {
+	sender := &recordingSender{}
+	cfg := config.Config{
+		Notification: config.NotificationConfig{MaxContextLines: 10, MaxContextBytes: 1024},
+		Runtime:      config.RuntimeConfig{ReadChunkBytes: 4, MaxLineBytes: 1024, MaxTrackedFiles: 10},
+	}
+	m := New(cfg, sender, log.New(io.Discard, "", 0))
+	tracked := &tracker{source: config.LogSourceConfig{Name: "app", Levels: []string{"ERROR"}, LevelRegex: `\b(ERROR)\b`}}
+	m.processChunk("app.log", []byte("ERR"), tracked)
+	m.processChunk("app.log", []byte("OR failed\n"), tracked)
+	if len(sender.messages) != 1 || sender.messages[0].Content != "ERROR failed" {
+		t.Fatalf("messages = %+v", sender.messages)
+	}
+}
+
+func TestProcessChunkDiscardsOverlongLine(t *testing.T) {
+	sender := &recordingSender{}
+	cfg := config.Config{
+		Notification: config.NotificationConfig{MaxContextLines: 10, MaxContextBytes: 1024},
+		Runtime:      config.RuntimeConfig{ReadChunkBytes: 4, MaxLineBytes: 8, MaxTrackedFiles: 10},
+	}
+	m := New(cfg, sender, log.New(io.Discard, "", 0))
+	tracked := &tracker{source: config.LogSourceConfig{Name: "app", Levels: []string{"ERROR"}, LevelRegex: `\b(ERROR)\b`}}
+	m.processChunk("app.log", []byte("ERROR this line is too long\nERROR ok\n"), tracked)
+	if len(sender.messages) != 1 || sender.messages[0].Content != "ERROR ok" {
+		t.Fatalf("messages = %+v", sender.messages)
+	}
+}
+
+func TestContextIsLimitedByBytes(t *testing.T) {
+	lines := []string{}
+	lines = appendLimited(lines, "1234", 10, 10)
+	lines = appendLimited(lines, "5678", 10, 10)
+	lines = appendLimited(lines, "x", 10, 10)
+	if len(lines) != 2 {
+		t.Fatalf("lines = %v", lines)
 	}
 }

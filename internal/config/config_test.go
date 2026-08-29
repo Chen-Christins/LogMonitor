@@ -65,6 +65,22 @@ func TestDisabledSignatureIgnoresConfiguredSecret(t *testing.T) {
 	}
 }
 
+func TestRuntimeDefaults(t *testing.T) {
+	cfg := Config{
+		LogSources: []LogSourceConfig{{File: "app.log"}},
+		Feishu:     FeishuConfig{WebhookURL: "https://example.com/hook"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Runtime.MemoryLimitMB != 256 || cfg.Runtime.ReadChunkBytes != 64*1024 {
+		t.Fatalf("runtime defaults = %+v", cfg.Runtime)
+	}
+	if cfg.Notification.MaxContextBytes != 64*1024 {
+		t.Fatalf("max context bytes = %d", cfg.Notification.MaxContextBytes)
+	}
+}
+
 func TestConfigRejectsFileAndDirectoryTogether(t *testing.T) {
 	cfg := Config{
 		LogSources: []LogSourceConfig{{Name: "bad", File: "app.log", Directory: "logs"}},

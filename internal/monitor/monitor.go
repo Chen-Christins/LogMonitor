@@ -1,7 +1,9 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
@@ -31,14 +33,15 @@ type Sender interface {
 }
 
 type tracker struct {
-	file       *os.File
-	info       os.FileInfo
-	offset     int64
-	partial    string
-	previous   []string
-	pending    []*pendingAlert
-	source     config.LogSourceConfig
-	lastChange time.Time
+	file        *os.File
+	info        os.FileInfo
+	offset      int64
+	partial     string
+	discardLine bool
+	previous    []string
+	pending     []*pendingAlert
+	source      config.LogSourceConfig
+	lastChange  time.Time
 }
 
 type pendingAlert struct {
@@ -60,6 +63,21 @@ type batchGroup struct {
 }
 
 func New(config config.Config, sender Sender, logger *log.Logger) *Monitor {
+	if config.Notification.MaxContextLines <= 0 {
+		config.Notification.MaxContextLines = 100
+	}
+	if config.Notification.MaxContextBytes <= 0 {
+		config.Notification.MaxContextBytes = 64 * 1024
+	}
+	if config.Runtime.ReadChunkBytes <= 0 {
+		config.Runtime.ReadChunkBytes = 64 * 1024
+	}
+	if config.Runtime.MaxLineBytes <= 0 {
+		config.Runtime.MaxLineBytes = 1024 * 1024
+	}
+	if config.Runtime.MaxTrackedFiles <= 0 {
+		config.Runtime.MaxTrackedFiles = 1000
+	}
 	return &Monitor{config: config, sender: sender, logger: logger, trackers: map[string]*tracker{}, seen: map[string]time.Time{}, batches: map[string]*batchGroup{}}
 }
 
@@ -88,6 +106,10 @@ func (m *Monitor) scan(ctx context.Context) {
 			continue
 		}
 		for _, path := range paths {
+			if _, exists := m.trackers[path]; !exists && len(m.trackers) >= m.config.Runtime.MaxTrackedFiles {
+				m.logger.Printf("skip %s: max tracked files (%d) reached", path, m.config.Runtime.MaxTrackedFiles)
+				continue
+			}
 			if err := m.readFile(ctx, path, source); err != nil {
 				m.logger.Printf("read %s: %v", path, err)
 			}
@@ -151,7 +173,7 @@ func (m *Monitor) readFile(ctx context.Context, path string, source config.LogSo
 		if _, err = t.file.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		t.offset, t.partial, t.previous = 0, "", nil
+		t.offset, t.partial, t.previous, t.discardLine = 0, "", nil, false
 	}
 	if info.Size() == t.offset {
 		return nil
@@ -160,25 +182,60 @@ func (m *Monitor) readFile(ctx context.Context, path string, source config.LogSo
 	if _, err = t.file.Seek(t.offset, io.SeekStart); err != nil {
 		return err
 	}
-	data, err := io.ReadAll(t.file)
-	if err != nil {
-		return err
-	}
-	t.offset += int64(len(data))
 	t.info = info
-	t.lastChange = time.Now()
-	text := t.partial + string(data)
-	parts := strings.Split(text, "\n")
-	t.partial = parts[len(parts)-1]
-	for _, raw := range parts[:len(parts)-1] {
+	buffer := make([]byte, m.config.Runtime.ReadChunkBytes)
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		m.processLine(path, strings.TrimSuffix(raw, "\r"), t)
+
+		n, readErr := t.file.Read(buffer)
+		if n > 0 {
+			t.offset += int64(n)
+			t.lastChange = time.Now()
+			m.processChunk(path, buffer[:n], t)
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
 	}
-	return nil
+}
+
+func (m *Monitor) processChunk(path string, data []byte, t *tracker) {
+	for len(data) > 0 {
+		newline := bytes.IndexByte(data, '\n')
+		if newline < 0 {
+			m.appendPartial(data, t)
+			return
+		}
+
+		m.appendPartial(data[:newline], t)
+		if !t.discardLine {
+			m.processLine(path, strings.TrimSuffix(t.partial, "\r"), t)
+		}
+		t.partial = ""
+		t.discardLine = false
+		data = data[newline+1:]
+	}
+}
+
+func (m *Monitor) appendPartial(data []byte, t *tracker) {
+	if t.discardLine {
+		return
+	}
+	remaining := m.config.Runtime.MaxLineBytes - len(t.partial)
+	if len(data) > remaining {
+		t.partial = ""
+		t.discardLine = true
+		m.logger.Printf("discard overlong line from %s (limit %d bytes)", t.source.Name, m.config.Runtime.MaxLineBytes)
+		return
+	}
+	t.partial += string(data)
 }
 
 func (m *Monitor) openNewFile(path string, source config.LogSourceConfig, info os.FileInfo) error {
@@ -194,9 +251,9 @@ func (m *Monitor) openNewFile(path string, source config.LogSourceConfig, info o
 func (m *Monitor) processLine(path, line string, t *tracker) {
 	for i := 0; i < len(t.pending); {
 		alert := t.pending[i]
-		alert.lines = append(alert.lines, line)
+		alert.lines = appendLimited(alert.lines, line, m.config.Notification.MaxContextLines, m.config.Notification.MaxContextBytes)
 		alert.remain--
-		if alert.remain <= 0 || len(alert.lines) >= m.config.Notification.MaxContextLines {
+		if alert.remain <= 0 || contextFull(alert.lines, m.config.Notification) {
 			m.sendAlert(path, t.source, alert)
 			t.pending = append(t.pending[:i], t.pending[i+1:]...)
 			continue
@@ -210,6 +267,7 @@ func (m *Monitor) processLine(path, line string, t *tracker) {
 			lines = lines[len(lines)-m.config.Notification.MaxContextLines+1:]
 		}
 		lines = append(lines, line)
+		lines = trimContext(lines, m.config.Notification.MaxContextLines, m.config.Notification.MaxContextBytes)
 		alert := &pendingAlert{trigger: line, level: level, lines: lines, remain: t.source.AfterLines}
 		if alert.remain == 0 || len(alert.lines) >= m.config.Notification.MaxContextLines {
 			m.sendAlert(path, t.source, alert)
@@ -219,8 +277,9 @@ func (m *Monitor) processLine(path, line string, t *tracker) {
 	}
 
 	t.previous = append(t.previous, line)
-	if len(t.previous) > t.source.BeforeLines {
+	if len(t.previous) > t.source.BeforeLines || contextBytes(t.previous) > m.config.Notification.MaxContextBytes {
 		t.previous = t.previous[len(t.previous)-t.source.BeforeLines:]
+		t.previous = trimContext(t.previous, t.source.BeforeLines, m.config.Notification.MaxContextBytes)
 	}
 }
 
@@ -261,7 +320,7 @@ func (m *Monitor) duplicate(path, trigger string) bool {
 	if m.config.Notification.CooldownSeconds <= 0 {
 		return false
 	}
-	key := path + "\x00" + trigger
+	key := fmt.Sprintf("%s\x00%x", path, sha256.Sum256([]byte(trigger)))
 	now := time.Now()
 	cooldown := time.Duration(m.config.Notification.CooldownSeconds) * time.Second
 	if previous, ok := m.seen[key]; ok && now.Sub(previous) < cooldown {
@@ -299,9 +358,7 @@ func (m *Monitor) aggregateSeconds() int {
 }
 
 func (m *Monitor) sendAlert(path string, source config.LogSourceConfig, alert *pendingAlert) {
-	if len(alert.lines) > m.config.Notification.MaxContextLines {
-		alert.lines = alert.lines[:m.config.Notification.MaxContextLines]
-	}
+	alert.lines = trimContext(alert.lines, m.config.Notification.MaxContextLines, m.config.Notification.MaxContextBytes)
 	if m.aggregateSeconds() <= 0 {
 		m.sendFeishu(feishu.Message{
 			Title:   fmt.Sprintf("LogMonitor 告警 - %s", alert.level),
@@ -326,7 +383,9 @@ func (m *Monitor) addToBatch(source, file string, alert *pendingAlert) {
 	if g.file == "" {
 		g.file = file
 	}
-	g.lines = append(g.lines, alert.lines...)
+	for _, line := range alert.lines {
+		g.lines = appendLimited(g.lines, line, m.config.Notification.MaxContextLines, m.config.Notification.MaxContextBytes)
+	}
 	g.count++
 }
 
@@ -336,7 +395,7 @@ func (m *Monitor) flushBatches() {
 	window := time.Duration(m.aggregateSeconds()) * time.Second
 	maxLines := m.config.Notification.MaxContextLines
 	for k, g := range m.batches {
-		if time.Since(g.first) < window && len(g.lines) < maxLines {
+		if time.Since(g.first) < window && len(g.lines) < maxLines && contextBytes(g.lines) < m.config.Notification.MaxContextBytes {
 			continue
 		}
 		m.sendFeishu(feishu.Message{
@@ -349,6 +408,35 @@ func (m *Monitor) flushBatches() {
 		})
 		delete(m.batches, k)
 	}
+}
+
+func appendLimited(lines []string, line string, maxLines, maxBytes int) []string {
+	if len(lines) >= maxLines || contextBytes(lines)+len(line)+1 > maxBytes {
+		return lines
+	}
+	return append(lines, line)
+}
+
+func trimContext(lines []string, maxLines, maxBytes int) []string {
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	for len(lines) > 0 && contextBytes(lines) > maxBytes {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func contextFull(lines []string, notification config.NotificationConfig) bool {
+	return len(lines) >= notification.MaxContextLines || contextBytes(lines) >= notification.MaxContextBytes
+}
+
+func contextBytes(lines []string) int {
+	total := 0
+	for _, line := range lines {
+		total += len(line) + 1
+	}
+	return total
 }
 
 func (m *Monitor) sendFeishu(msg feishu.Message) {

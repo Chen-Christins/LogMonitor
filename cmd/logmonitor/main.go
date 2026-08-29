@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	"github.com/kardianos/service"
 )
@@ -53,6 +54,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	memoryLimit := int64(cfg.Runtime.MemoryLimitMB) * 1024 * 1024
+	debug.SetMemoryLimit(memoryLimit)
+	log.Printf("Go memory limit set to %d MB", cfg.Runtime.MemoryLimitMB)
 
 	client := feishu.NewClient(cfg.Feishu, cfg.Notification)
 	app := monitor.New(cfg, client, log.Default())

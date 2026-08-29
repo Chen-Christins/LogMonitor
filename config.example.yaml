@@ -22,7 +22,14 @@ feishu:
 
 notification:
   cooldown_seconds: 60
-  max_context_lines: 100
-  retry_count: 3
-  # 同来源+同级别的告警在窗口内合并为一条消息，避免突发日志刷屏；默认 5 秒，0 表示不合并
+  # 同来源、同级别的告警在窗口内合并，0 表示不合并
   aggregate_seconds: 5
+  max_context_lines: 100
+  max_context_bytes: 65536
+  retry_count: 3
+
+runtime:
+  memory_limit_mb: 256
+  read_chunk_bytes: 65536
+  max_line_bytes: 1048576
+  max_tracked_files: 1000
